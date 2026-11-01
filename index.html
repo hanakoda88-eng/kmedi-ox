@@ -85,7 +85,7 @@
   .arena.lobby .zone { background: transparent; border: 0; }
   .zone.correct { background: rgba(255, 255, 255, .12); } .arena.lobby .zone .glyph, .arena.lobby .zone .glyph-img, .arena.lobby .zone .cnt { display: none; }
 
-  .chip { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; will-change: transform; user-select: none; cursor: pointer; }
+  .chip { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; will-change: transform; user-select: none; cursor: default; }
   .chip img { width: var(--av, 40px); height: var(--av, 40px); display: block; margin-bottom: -3px; position: relative; z-index: 1; }
   .chip .tag { padding: 3px 11px; border-radius: 999px; background: #fff; border: 2px solid var(--ink);
           font-weight: 700; font-size: var(--chip-fs, 18px); white-space: nowrap; color: var(--ink); }
@@ -826,7 +826,7 @@ function startHost(be) {
         const el = h('div', 'chip' + (p.bot ? ' bot' : ''));
         const img = charImg(p.c), tag = h('span', 'tag');
         el.append(img, tag);
-        el.onclick = () => kill(id);
+        el.onclick = e => { if (e.shiftKey) kill(id); };   // 실수 방지: Shift+클릭일 때만 삭제
         arena.append(el);
         c = chips[id] = { el, img, tag, ch: p.c, x: arena.clientWidth * 0.35, y: arena.clientHeight * 0.5, zone: null, tx: 0, ty: 0, next: 0 };
       }
@@ -841,9 +841,11 @@ function startHost(be) {
     });
   }
   function kill(id) {
-    if (armedKill !== id) { armedKill = id; sync(); toast('한 번 더 누르면 "' + (allPlayers()[id] || {}).name + '" 이름을 삭제해요'); setTimeout(() => { if (armedKill === id) { armedKill = null; sync(); } }, 3000); return; }
+    const name = (allPlayers()[id] || {}).name || '';
+    armedKill = id; sync();
+    const ok = confirm(`"${name}" 이름을 게임에서 지울까요?`);
     armedKill = null;
-    if (bots[id]) delete bots[id]; else be.deletePlayer(id);
+    if (ok) { if (bots[id]) delete bots[id]; else be.deletePlayer(id); }
     sync();
   }
   (function frame() {
