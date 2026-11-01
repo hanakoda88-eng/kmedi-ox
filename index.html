@@ -390,7 +390,7 @@ function startPlayer(be) {
     clearTimeout(saveTimer); saveTimer = null;
     if (savedSide === mySide) return;
     savedSide = mySide; moves++;
-    be.savePlayer({ side: mySide, t: Date.now() });
+    be.savePlayer({ side: mySide, t: (game && game.qNo) || 0 });   // t = 몇 번 문제에서 고른 위치인지
   }
   function choose(side) {
     if (!game || game.phase !== 'question' || localLocked || !amAlive()) return;
@@ -424,7 +424,7 @@ function startPlayer(be) {
       if (!name) { inp.focus(); return; }
       myName = name; localStorage.setItem('ox_name', name); localStorage.setItem('ox_char', myChar);
       localStorage.setItem(JK, String((game && game.resetAt) || 0)); joined = true;
-      be.savePlayer({ name, c: myChar, side: null, t: Date.now() }); savedSide = null; mySide = null;
+      be.savePlayer({ name, c: myChar, side: null, t: 0 }); savedSide = null; mySide = null;
       render();
     };
     btn.onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
@@ -520,6 +520,7 @@ function startPlayer(be) {
     if (g && g.phase === 'question' && (!prev || prev.phase !== 'question' || prev.qNo !== g.qNo)) {
       game._endLocal = Date.now() + (g.duration || QUESTION_SECONDS) * 1000;   // 받은 시점부터 카운트
       localLocked = false;
+      clearTimeout(saveTimer); mySide = null; savedSide = null;   // 새 문제: 모두 '아직 안 고름'에서 출발
     } else if (g && prev && prev._endLocal && g.phase === 'question') game._endLocal = prev._endLocal;
     if (g && g.phase === 'locked') flush();   // 마감 직전 이동분 즉시 저장
     const epoch = String((g && g.resetAt) || 0);
@@ -527,7 +528,7 @@ function startPlayer(be) {
       // 새로고침: 같은 회차에 이미 입장했으면 이어서 참가 (가운데에서 다시 시작)
       firstGame = false;
       if (joined) localStorage.setItem(JK, epoch);   // 게임 정보 받기 전에 입장한 경우
-      else if (localStorage.getItem(JK) === epoch && myName) { joined = true; be.savePlayer({ name: myName, c: myChar, side: null, t: Date.now() }); }
+      else if (localStorage.getItem(JK) === epoch && myName) { joined = true; be.savePlayer({ name: myName, c: myChar, side: null, t: 0 }); }
     } else if (joined && localStorage.getItem(JK) !== epoch) {
       // 진행자가 '처음으로'를 눌러 참가자 명단이 지워짐 → 다시 입장
       joined = false; mySide = null; savedSide = null; localStorage.removeItem(JK);
@@ -631,7 +632,8 @@ function startHost(be) {
       <button id="bReset">처음으로</button>
     </div>
   </div>`;
-  $('.h-title').textContent = EVENT_TITLE + (be.mode === 'demo' ? ' (데모)' : '') + (ROOM ? ' (방: ' + ROOM + ')' : '');
+  $('.h-title').textContent = EVENT_TITLE + (be.mode === 'demo' ? ' (데모)' : '');
+  if (ROOM) document.title = EVENT_TITLE + ' [' + ROOM + ']';   // 방 이름은 브라우저 탭 제목에만 표시
 
   $('#zO .glyph-img').src = markSrc('O'); $('#zX .glyph-img').src = markSrc('X');
   const joinUrl = location.origin + location.pathname + (ROOM ? '?room=' + ROOM : '');
@@ -646,6 +648,8 @@ function startHost(be) {
 
   const arena = $('#arena');
   const allPlayers = () => ({ ...players, ...bots });
+  // 이번 문제에서 고른 위치만 인정 (이전 문제 위치는 '아직 안 고름')
+  const curSide = p => (p && game && game.qNo && p.t === game.qNo) ? (p.side || null) : null;
   const aliveList = () => game && game.alive ? game.alive : Object.keys(allPlayers());
   const isAlive = id => !game || !game.alive || game.alive.includes(id);
 
@@ -704,7 +708,7 @@ function startHost(be) {
   function snapshotSides() {
     const all = allPlayers();
     lockedSides = {};
-    (game.alive || []).forEach(id => lockedSides[id] = all[id] ? (all[id].side || null) : null);
+    (game.alive || []).forEach(id => lockedSides[id] = curSide(all[id]));
   }
   function reveal() {
     sfx.ding();
@@ -717,6 +721,13 @@ function startHost(be) {
     save({ phase: 'reveal', answer: q.answer, alive, prevAlive, allWrong });
     // 탈락 애니메이션
     if (!allWrong) prevAlive.forEach(id => { if (!alive.includes(id) && chips[id]) { chips[id].el.classList.add('out'); chips[id].dying = Date.now(); } });
+    // 최후의 1명이 남거나 마지막 문제가 끝나면 3.5초 뒤 자동으로 우승자 발표 (남은 사람 전원 우승)
+    const lastQ = game.qNo >= questions.length;
+    if ((alive.length === 1 && prevAlive.length > 1) || lastQ) {
+      const qn = game.qNo;
+      $('#msg').textContent = alive.length === 1 ? '최후의 1인! 잠시 후 우승자를 발표해요' : `마지막 문제 끝! 생존자 ${alive.length}명 모두 우승이에요`;
+      setTimeout(() => { if (game.phase === 'reveal' && game.qNo === qn) finale(); }, 3500);
+    }
   }
   function finale() {
     sfx.fanfare();
@@ -821,7 +832,7 @@ function startHost(be) {
       }
       if (c.tag.textContent !== (p.name || '?')) c.tag.textContent = p.name || '?';
       if (c.ch !== p.c) { c.ch = p.c; c.img.src = charSrc(p.c); }
-      const side = phase === 'lobby' ? null : (lockedSides && phase !== 'question' && id in lockedSides ? lockedSides[id] : p.side);
+      const side = phase === 'lobby' ? null : (lockedSides && phase !== 'question' && id in lockedSides ? lockedSides[id] : curSide(p));
       const zone = phase === 'lobby' ? 'lobby' : (side || 'M');
       if (zone !== c.zone) { c.zone = zone; newTarget(c); }
       c.el.className = 'chip' + (p.bot ? ' bot' : '') + (side ? ' side-' + side : '') + (c.dying ? ' out' : '') + (armedKill === id ? ' kill' : '');
@@ -854,7 +865,7 @@ function startHost(be) {
     let moved = false;
     for (const id in bots) {
       if (!isAlive(id)) continue;
-      if (Math.random() < 0.12) { bots[id].side = Math.random() < 0.5 ? 'O' : 'X'; moved = true; }
+      if (Math.random() < 0.12) { bots[id].side = Math.random() < 0.5 ? 'O' : 'X'; bots[id].t = game.qNo; moved = true; }
     }
     if (moved) render();
   }, 400);
@@ -885,7 +896,7 @@ function startHost(be) {
 
     // O/X 인원
     const cnt = { O: 0, X: 0 };
-    alive.forEach(id => { const s = lockedSides && ph !== 'question' && id in lockedSides ? lockedSides[id] : (all[id] || {}).side; if (s) cnt[s]++; });
+    alive.forEach(id => { const s = lockedSides && ph !== 'question' && id in lockedSides ? lockedSides[id] : curSide(all[id]); if (s) cnt[s]++; });
     $('#cO').innerHTML = ph === 'lobby' ? '' : cnt.O + '<small>명</small>';
     $('#cX').innerHTML = ph === 'lobby' ? '' : cnt.X + '<small>명</small>';
     if (ph !== 'question') $('#tbar').style.width = ph === 'locked' ? '0%' : '0';
@@ -905,7 +916,7 @@ function startHost(be) {
     };
     bMain.innerHTML = ''; bMain.append(document.createTextNode(labels[ph])); bMain.append(h('kbd', null, 'Space'));
     const msg = $('#msg');
-    if (ph === 'reveal') msg.textContent = game.allWrong ? '전원 오답이라 아무도 탈락하지 않았어요.' : `정답 ${game.answer} · 생존 ${alive.length}명` + (alive.length <= 3 ? ' — 우승자 발표 가능!' : '');
+    if (ph === 'reveal') msg.textContent = !more ? `마지막 문제 끝! 생존자 ${alive.length}명 모두 우승이에요` : game.allWrong ? '전원 오답이라 아무도 탈락하지 않았어요.' : alive.length === 1 ? '최후의 1인! 잠시 후 우승자를 발표해요' : `정답 ${game.answer}, 생존 ${alive.length}명` + (alive.length <= 3 ? '. 우승자 발표도 할 수 있어요' : '');
     else if (ph === 'lobby') msg.textContent = `문제 ${questions.length}개 준비됨` + (be.mode === 'demo' ? '. 데모 모드라 같은 브라우저의 다른 탭에서만 참가할 수 있어요.' : '');
     else if (ph === 'question') msg.textContent = '';
 
