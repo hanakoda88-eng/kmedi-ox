@@ -140,8 +140,8 @@
   /* ───────── 참가자 화면 ───────── */
   .player { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   .p-join { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 28px; gap: 14px; }
-  .p-join h1 { font-family: var(--display); font-weight: 400; font-size: 40px; line-height: 1.15; margin: 0 0 6px; }
-  .p-join p { margin: 0 0 10px; color: var(--muted); font-size: 16px; line-height: 1.5; }
+  .p-join h1 { font-family: var(--display); font-weight: 400; font-size: clamp(26px, 8.4vw, 40px); line-height: 1.15; margin: 0 0 6px; white-space: pre-line; word-break: keep-all; }
+  .p-join p { margin: 0 0 10px; color: var(--muted); font-size: 16px; line-height: 1.5; word-break: keep-all; }
   .p-pick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 6px; }
   .p-join .p-pick button { border: 2px solid var(--line); background: #fff; border-radius: 14px; padding: 8px 2px 6px; min-width: 0; white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 4px; font: 700 12px var(--text); color: var(--ink); }
   .p-join .p-pick button img { width: 100%; max-width: 54px; aspect-ratio: 1; }
@@ -404,7 +404,7 @@ function startPlayer(be) {
   function renderJoin() {
     root.innerHTML = '';
     const w = h('div', 'p-join');
-    w.append(h('h1', null, EVENT_TITLE));
+    w.append(h('h1', null, EVENT_TITLE.replace(' ', '\n')));   // '케이메디허브' 다음에서 줄바꿈
     w.append(h('p', null, '캐릭터와 이름을 정하면 큰 화면에 내 캐릭터가 나타나요.'));
     w.append(h('div', 'p-label', '캐릭터 고르기'));
     const pick = h('div', 'p-pick');
