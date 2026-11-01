@@ -234,6 +234,9 @@ function startPlayer(be) {
   const root = h('div', 'player'); app.append(root);
 
   const amAlive = () => !game || !game.alive || game.alive.includes(be.uid);
+  // 이번 판(처음으로 회차)에 참가했던 적이 있는지 기억 → 새로고침해도 '탈락' / '관전' 구분
+  const playedKey = () => 'ox_played_' + GAME_ID + '_' + be.uid + '_' + ((game && game.resetAt) || 0);
+  const played = () => !!localStorage.getItem(playedKey()) || ((game && game.prevAlive) || []).includes(be.uid);
 
   function flush() {
     clearTimeout(saveTimer); saveTimer = null;
@@ -318,6 +321,13 @@ function startPlayer(be) {
     head.append(h('div', 'p-q', `Q${game.qNo}. ${game.qText || ''}`));
     const tm = h('div', 'p-timer', ph === 'locked' ? '마감' : '');
     head.append(tm);
+    if (game.alive && amAlive()) localStorage.setItem(playedKey(), '1');
+    if (!amAlive()) {
+      const out = played();
+      root.append(head, center(out ? '😢 탈락' : '👀 관전 모드',
+        out ? '아쉽지만 탈락했어요. 큰 화면을 보며 정답을 맞혀보세요!' : '게임이 이미 시작돼서 이번 판은 관전만 할 수 있어요.'), foot);
+      return;
+    }
     const sides = h('div', 'p-sides' + (ph !== 'question' || !amAlive() ? ' disabled' : ''));
     ['O', 'X'].forEach(s => {
       const b = h('button', 'p-side ' + s.toLowerCase() + (mySide === s ? ' sel' : ''));
