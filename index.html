@@ -121,8 +121,8 @@
    ═══════════════════════════════════════════════════════ */
 
 // Firebase 콘솔 > 프로젝트 설정 > 내 앱(웹)에서 복사한 값을 붙여넣으세요.
-// null 이면 "데모 모드": 같은 브라우저의 탭끼리만 연결됩니다(테스트용).
-const FIREBASE_CONFIG = {
+// 내 PC(localhost)에서 열면 "데모 모드": 같은 브라우저의 탭끼리만 연결됩니다(테스트용).
+const FIREBASE_CONFIG_REAL = {
   apiKey: "AIzaSyDrJmANqrSNLIl_XY9Nuxy2OdjHlkp45bg",
   authDomain: "kmedi-ox.firebaseapp.com",
   projectId: "kmedi-ox",
@@ -130,14 +130,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "966443045371",
   appId: "1:966443045371:web:80330ef2f756d3336b7b5e",
 };
-/* 예시)
-const FIREBASE_CONFIG = {
-  apiKey: "AIza...",
-  authDomain: "kmedi-ox.firebaseapp.com",
-  projectId: "kmedi-ox",
-  appId: "1:123:web:abc",
-};
-*/
+const FIREBASE_CONFIG = ["localhost", "127.0.0.1", ""].includes(location.hostname) ? null : FIREBASE_CONFIG_REAL;
 
 // 게임 방 이름: 주소에 ?room=이름 을 붙이면 다른 방이 돼요 (리허설: ?room=test, 본행사: 아무것도 안 붙임)
 const ROOM = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '');
@@ -192,6 +185,13 @@ async function makeBackend() {
     watchPlayers: cb => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, onErr),
     savePlayer: d => F.setDoc(F.doc(playersCol, uid), d, { merge: true }).catch(onErr),
     deletePlayer: id => F.deleteDoc(F.doc(playersCol, id)).catch(onErr),
+    deleteAllPlayers: async ids => {
+      for (let i = 0; i < ids.length; i += 400) {
+        const b = F.writeBatch(db);
+        ids.slice(i, i + 400).forEach(id => b.delete(F.doc(playersCol, id)));
+        await b.commit().catch(onErr);
+      }
+    },
   };
 }
 
@@ -211,13 +211,15 @@ function makeDemoBackend() {
     watchPlayers: cb => { subs[KP].push(cb); setTimeout(() => cb(read(KP) || {})); },
     savePlayer: async d => { const p = read(KP) || {}; p[uid] = { ...(p[uid] || {}), ...d }; write(KP, p); },
     deletePlayer: async id => { const p = read(KP) || {}; delete p[id]; write(KP, p); },
+    deleteAllPlayers: async () => write(KP, {}),
   };
 }
 
 /* ═══════════════════════ 참가자 화면 ═══════════════════════ */
 function startPlayer(be) {
   let game = null, mySide = null, savedSide = null, saveTimer = null, localLocked = false;
-  let moves = 0, movesQ = null, countdown = null, joined = !!localStorage.getItem('ox_joined_' + GAME_ID + be.uid);
+  let moves = 0, movesQ = null, countdown = null, joined = false, firstGame = true;
+  const JK = 'ox_joined_' + GAME_ID + be.uid;   // 입장할 때의 '처음으로' 회차를 기억
   let myName = localStorage.getItem('ox_name') || '';
 
   const root = h('div', 'player'); app.append(root);
@@ -250,7 +252,7 @@ function startPlayer(be) {
       const name = inp.value.trim().slice(0, 12);
       if (!name) { inp.focus(); return; }
       myName = name; localStorage.setItem('ox_name', name);
-      localStorage.setItem('ox_joined_' + GAME_ID + be.uid, '1'); joined = true;
+      localStorage.setItem(JK, String((game && game.resetAt) || 0)); joined = true;
       be.savePlayer({ name, side: null, t: Date.now() }); savedSide = null; mySide = null;
       render();
     };
@@ -338,14 +340,19 @@ function startPlayer(be) {
       localLocked = false;
     } else if (g && prev && prev._endLocal && g.phase === 'question') game._endLocal = prev._endLocal;
     if (g && g.phase === 'locked') flush();   // 마감 직전 이동분 즉시 저장
-    if (g && g.phase === 'lobby' && prev && g.resetAt && prev.resetAt !== g.resetAt && mySide) {
-      mySide = null; savedSide = null; be.savePlayer({ side: null, t: Date.now() });   // 처음으로: 가운데로 복귀
+    const epoch = String((g && g.resetAt) || 0);
+    if (firstGame) {
+      // 새로고침: 같은 회차에 이미 입장했으면 이어서 참가 (가운데에서 다시 시작)
+      firstGame = false;
+      if (joined) localStorage.setItem(JK, epoch);   // 게임 정보 받기 전에 입장한 경우
+      else if (localStorage.getItem(JK) === epoch && myName) { joined = true; be.savePlayer({ name: myName, side: null, t: Date.now() }); }
+    } else if (joined && localStorage.getItem(JK) !== epoch) {
+      // 진행자가 '처음으로'를 눌러 참가자 명단이 지워짐 → 다시 입장
+      joined = false; mySide = null; savedSide = null; localStorage.removeItem(JK);
+      toast('게임이 새로 시작됐어요. 이름을 다시 입력해 주세요!');
     }
     render();
   });
-
-  // 새로고침했을 때 화면과 저장된 위치를 맞춤 (가운데에서 다시 시작)
-  if (joined && myName) be.savePlayer({ name: myName, side: null, t: Date.now() });
 }
 
 /* ═══════════════════════ 진행자 화면 ═══════════════════════ */
@@ -484,9 +491,11 @@ function startHost(be) {
     toast('전원 부활!');
   };
   $('#bReset').onclick = () => {
-    if (!confirm('게임을 처음(대기 화면)으로 되돌릴까요? 참가자 이름은 그대로 남아요.')) return;
+    const n = Object.keys(allPlayers()).length;
+    if (!confirm(`게임을 처음(대기 화면)으로 되돌릴까요?\n참가자 ${n}명이 모두 지워지고, 참가자들은 이름을 다시 입력해야 해요.`)) return;
     clearInterval(timer); lockedSides = null;
-    Object.values(chips).forEach(c => { c.el.classList.remove('out'); c.dying = 0; });
+    be.deleteAllPlayers(Object.keys(players));
+    players = {}; bots = {};
     save({ phase: 'lobby', qNo: 0, qText: '', answer: null, alive: null, prevAlive: null, allWrong: false, winners: null, resetAt: Date.now() });
   };
   $('#bBots').onclick = () => {
