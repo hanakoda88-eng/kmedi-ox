@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>OX 퀴즈</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" async></script>
+<style>
+  :root {
+    --o: #2563eb; --o-soft: #dbeafe;
+    --x: #e11d48; --x-soft: #ffe4e6;
+    --ink: #0f172a; --muted: #64748b; --bg: #f8fafc; --line: #e2e8f0;
+    --brand: #0f766e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; color: var(--ink); background: var(--bg); }
+  button { font: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #111827; color: #fff; padding: 12px 18px; border-radius: 10px; z-index: 999; font-size: 15px; max-width: 90vw; }
+
+  /* ───────── 진행자 화면 ───────── */
+  .host { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .h-top { display: flex; align-items: center; gap: 20px; padding: 14px 28px; background: #fff; border-bottom: 1px solid var(--line); }
+  .h-title { font-weight: 800; font-size: 22px; color: var(--brand); white-space: nowrap; }
+  .h-stat { margin-left: auto; display: flex; gap: 22px; font-size: 18px; color: var(--muted); white-space: nowrap; }
+  .h-stat b { color: var(--ink); font-size: 26px; }
+  .h-q { display: flex; align-items: center; gap: 28px; padding: 18px 40px; min-height: 120px; background: #fff; border-bottom: 1px solid var(--line); }
+  .h-qno { font-size: 22px; font-weight: 800; color: var(--brand); white-space: nowrap; }
+  .h-qtext { flex: 1; font-size: clamp(26px, 3.2vw, 48px); font-weight: 800; line-height: 1.3; word-break: keep-all; }
+  .h-timer { width: 110px; height: 110px; border-radius: 50%; display: grid; place-items: center; font-size: 56px; font-weight: 900; background: var(--ink); color: #fff; flex: none; }
+  .h-timer.warn { background: var(--x); animation: pulse .5s infinite alternate; }
+  @keyframes pulse { to { transform: scale(1.08); } }
+  .arena { position: relative; flex: 1; overflow: hidden; }
+  .zone { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; transition: box-shadow .3s, background .3s; }
+  .zone.o { left: 0; width: 42%; background: var(--o-soft); }
+  .zone.x { right: 0; width: 42%; background: var(--x-soft); }
+  .zone.mid { left: 42%; width: 16%; background: #f1f5f9; }
+  .zone .glyph { font-size: min(34vw, 50vh); font-weight: 900; line-height: 1; opacity: .13; user-select: none; }
+  .zone.o .glyph { color: var(--o); } .zone.x .glyph { color: var(--x); }
+  .zone.mid .glyph { font-size: 18px; opacity: .6; color: var(--muted); align-self: start; margin-top: 14px; }
+  .zone .cnt { position: absolute; top: 14px; font-size: 40px; font-weight: 900; }
+  .zone.o .cnt { color: var(--o); } .zone.x .cnt { color: var(--x); }
+  .zone.correct { box-shadow: inset 0 0 0 12px #16a34a; }
+  .zone.correct::after { content: '정답!'; position: absolute; bottom: 24px; z-index: 20; font-size: 64px; font-weight: 900; color: #fff; background: #16a34a; padding: 4px 28px; border-radius: 18px; }
+  .zone.wrong { filter: grayscale(.8) brightness(.95); }
+  .arena.lobby .zone { background: #fff; } .arena.lobby .zone .glyph, .arena.lobby .zone .cnt { display: none; }
+
+  .chip { position: absolute; left: 0; top: 0; padding: 6px 12px; border-radius: 999px; background: #fff; border: 2px solid var(--ink);
+          font-weight: 700; font-size: var(--chip-fs, 18px); white-space: nowrap; will-change: transform; box-shadow: 0 2px 6px rgba(0,0,0,.12); user-select: none; }
+  .chip.side-O { border-color: var(--o); color: var(--o); }
+  .chip.side-X { border-color: var(--x); color: var(--x); }
+  .chip.bot { border-style: dashed; }
+  .arena.crowd .chip { padding: 3px 8px; border-width: 1.5px; box-shadow: none; }
+  .chip.kill { background: var(--x); color: #fff; }
+  .chip.out { animation: fall 1.2s ease-in forwards; }
+  @keyframes fall { 0% { opacity: 1; } 100% { opacity: 0; margin-top: 160px; } }
+
+  .lobby-card { position: absolute; right: 2%; top: 50%; transform: translateY(-50%); width: 26%; min-width: 300px; background: #fff; border-radius: 22px; padding: 26px;
+                text-align: center; box-shadow: 0 10px 40px rgba(15,23,42,.15); z-index: 5; }
+  .lobby-card h2 { margin: 0 0 6px; font-size: 30px; }
+  .lobby-card .qr svg { width: 100%; height: auto; max-width: 320px; }
+  .lobby-card .url { font-size: 18px; font-weight: 700; color: var(--muted); word-break: break-all; margin-top: 8px; }
+  .lobby-card .big { font-size: 44px; font-weight: 900; color: var(--brand); }
+
+  .h-bar { display: flex; gap: 10px; padding: 10px 20px; background: #fff; border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
+  .h-bar button { padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-weight: 700; }
+  .h-bar button.primary { background: var(--brand); color: #fff; border-color: var(--brand); font-size: 18px; padding: 10px 22px; }
+  .h-bar .msg { color: var(--muted); font-size: 15px; margin-left: 8px; }
+  .h-bar .spacer { flex: 1; }
+
+  .final { position: fixed; inset: 0; background: rgba(15,23,42,.92); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; overflow: hidden; }
+  .final h1 { font-size: 64px; margin: 0 0 30px; }
+  .final .names { display: flex; flex-wrap: wrap; gap: 18px; justify-content: center; max-width: 88vw; max-height: 68vh; overflow: auto; }
+  .final .names.many { gap: 8px; } .final .names.many span { font-size: 20px; padding: 6px 14px; }
+  .final .sub { font-size: 24px; margin: -16px 0 24px; opacity: .8; }
+  .final .names span { font-size: 44px; font-weight: 900; background: #fbbf24; color: var(--ink); padding: 12px 30px; border-radius: 999px; }
+  .final .close { position: absolute; bottom: 24px; right: 24px; background: transparent; color: #fff; border: 1px solid #fff; padding: 8px 16px; border-radius: 8px; }
+  .confetti { position: absolute; top: -20px; width: 12px; height: 18px; animation: drop linear infinite; }
+  @keyframes drop { to { transform: translateY(110vh) rotate(720deg); } }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 60; }
+  .modal .box { background: #fff; border-radius: 16px; padding: 24px; width: min(760px, 94vw); }
+  .modal textarea { width: 100%; height: 50vh; font: 16px/1.6 monospace; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .modal .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
+  .modal .row button { padding: 10px 18px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-weight: 700; }
+  .modal .row button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+  /* ───────── 참가자 화면 ───────── */
+  .player { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .p-join { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 28px; gap: 16px; }
+  .p-join h1 { font-size: 26px; margin: 0; color: var(--brand); }
+  .p-join input { font-size: 22px; padding: 16px; border-radius: 12px; border: 2px solid var(--line); }
+  .p-join button { font-size: 20px; padding: 16px; border-radius: 12px; border: 0; background: var(--brand); color: #fff; font-weight: 800; }
+  .p-head { padding: 14px 18px; background: #fff; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; }
+  .p-q { flex: 1; font-size: 17px; font-weight: 700; line-height: 1.35; word-break: keep-all; }
+  .p-timer { font-size: 30px; font-weight: 900; min-width: 48px; text-align: center; }
+  .p-timer.warn { color: var(--x); }
+  .p-sides { flex: 1; display: flex; }
+  .p-side { flex: 1; border: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; font-size: 120px; font-weight: 900; transition: filter .2s, transform .1s; }
+  .p-side.o { background: var(--o-soft); color: var(--o); } .p-side.x { background: var(--x-soft); color: var(--x); }
+  .p-side.sel.o { background: var(--o); color: #fff; } .p-side.sel.x { background: var(--x); color: #fff; }
+  .p-side:active { transform: scale(.98); }
+  .p-side .mark { font-size: 150px; line-height: 1; font-family: Arial, sans-serif; }
+  .p-side .me { font-size: 18px; font-weight: 800; background: #fff; color: var(--ink); padding: 6px 14px; border-radius: 999px; visibility: hidden; }
+  .p-side.sel .me { visibility: visible; }
+  .p-sides.disabled .p-side { filter: grayscale(.7); pointer-events: none; }
+  .p-foot { padding: 12px 18px; background: #fff; border-top: 1px solid var(--line); font-size: 16px; text-align: center; color: var(--muted); }
+  .p-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px; }
+  .p-center .big { font-size: 44px; font-weight: 900; }
+  .p-center .sub { font-size: 18px; color: var(--muted); }
+  .p-badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 800; }
+  .p-badge.alive { background: #dcfce7; color: #15803d; } .p-badge.dead { background: #f1f5f9; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+/* ═══════════════════════════════════════════════════════
+   ▼▼▼ 설정 (여기만 고치면 됩니다) ▼▼▼
+   ═══════════════════════════════════════════════════════ */
+
+// Firebase 콘솔 > 프로젝트 설정 > 내 앱(웹)에서 복사한 값을 붙여넣으세요.
+// null 이면 "데모 모드": 같은 브라우저의 탭끼리만 연결됩니다(테스트용).
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDrJmANqrSNLIl_XY9Nuxy2OdjHlkp45bg",
+  authDomain: "kmedi-ox.firebaseapp.com",
+  projectId: "kmedi-ox",
+  storageBucket: "kmedi-ox.firebasestorage.app",
+  messagingSenderId: "966443045371",
+  appId: "1:966443045371:web:80330ef2f756d3336b7b5e",
+};
+/* 예시)
+const FIREBASE_CONFIG = {
+  apiKey: "AIza...",
+  authDomain: "kmedi-ox.firebaseapp.com",
+  projectId: "kmedi-ox",
+  appId: "1:123:web:abc",
+};
+*/
+
+// 게임 방 이름: 주소에 ?room=이름 을 붙이면 다른 방이 돼요 (리허설: ?room=test, 본행사: 아무것도 안 붙임)
+const ROOM = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '');
+const GAME_ID = ROOM || 'kmedi-anniversary';
+const EVENT_TITLE = '케이메디허브 창립기념 OX 퀴즈';
+const QUESTION_SECONDS = 10;                    // 문제당 제한 시간(초)
+const MAX_MOVES_PER_QUESTION = 12;              // 한 문제에서 O↔X 이동 저장 최대 횟수 (무료 사용량 보호)
+
+// 기본 문제 (진행자 화면의 [문제 편집]에서 바꿀 수 있어요). 형식: "O 문제" 또는 "X 문제"
+const DEFAULT_QUESTIONS = `O [연습] 10초 안에 O 또는 X 쪽으로 이동해야 한다
+X [연습] 아무 쪽도 고르지 않고 가운데 있으면 살아남는다
+O [연습] 모두가 틀리면 아무도 탈락하지 않는다`;
+
+/* ═══════════════════════════════════════════════════════ */
+
+const $ = (s, el = document) => el.querySelector(s);
+const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const app = $('#app');
+const isHost = new URLSearchParams(location.search).has('host');
+document.title = EVENT_TITLE;
+
+function toast(msg, ms = 3500) {
+  const t = h('div', 'toast', msg); document.body.append(t); setTimeout(() => t.remove(), ms);
+}
+
+/* ───────── 저장소: Firebase(Firestore) 또는 데모(localStorage) ───────── */
+async function makeBackend() {
+  if (!FIREBASE_CONFIG) return makeDemoBackend();
+  const V = '10.12.2';
+  const [{ initializeApp }, A, F] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+  ]);
+  const fb = initializeApp(FIREBASE_CONFIG);
+  const auth = A.getAuth(fb);
+  const db = F.getFirestore(fb);
+  const uid = await new Promise((res, rej) => {
+    const off = A.onAuthStateChanged(auth, u => { if (u) { off(); res(u.uid); } });
+    A.signInAnonymously(auth).catch(rej);
+  });
+  const gameRef = F.doc(db, 'games', GAME_ID);
+  const playersCol = F.collection(db, 'games', GAME_ID, 'players');
+  const onErr = e => { console.error(e); toast('연결 오류: ' + (e.code || e.message)); };
+  return {
+    mode: 'firebase', uid,
+    watchGame: cb => F.onSnapshot(gameRef, s => cb(s.exists() ? s.data() : null), onErr),
+    setGame: d => F.setDoc(gameRef, { ...d, hostUid: uid }).catch(e => {
+      onErr(e);
+      if (e.code === 'permission-denied') toast('이 게임 방은 다른 기기가 진행 중이에요. GAME_ID를 바꾸거나 콘솔에서 게임 문서를 지워주세요.', 8000);
+    }),
+    watchPlayers: cb => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, onErr),
+    savePlayer: d => F.setDoc(F.doc(playersCol, uid), d, { merge: true }).catch(onErr),
+    deletePlayer: id => F.deleteDoc(F.doc(playersCol, id)).catch(onErr),
+  };
+}
+
+function makeDemoBackend() {
+  let uid = sessionStorage.getItem('ox_uid');
+  if (!uid) { uid = 'u' + Math.random().toString(36).slice(2, 10); sessionStorage.setItem('ox_uid', uid); }
+  const KG = 'oxdemo_game_' + GAME_ID, KP = 'oxdemo_players_' + GAME_ID;
+  const read = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+  const subs = { [KG]: [], [KP]: [] };
+  const emit = k => subs[k].forEach(cb => cb(k === KP ? (read(k) || {}) : read(k)));
+  addEventListener('storage', e => { if (subs[e.key]) emit(e.key); });
+  const write = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); emit(k); };
+  return {
+    mode: 'demo', uid,
+    watchGame: cb => { subs[KG].push(cb); setTimeout(() => cb(read(KG))); },
+    setGame: async d => write(KG, { ...d, hostUid: uid }),
+    watchPlayers: cb => { subs[KP].push(cb); setTimeout(() => cb(read(KP) || {})); },
+    savePlayer: async d => { const p = read(KP) || {}; p[uid] = { ...(p[uid] || {}), ...d }; write(KP, p); },
+    deletePlayer: async id => { const p = read(KP) || {}; delete p[id]; write(KP, p); },
+  };
+}
+
+/* ═══════════════════════ 참가자 화면 ═══════════════════════ */
+function startPlayer(be) {
+  let game = null, mySide = null, savedSide = null, saveTimer = null, localLocked = false;
+  let moves = 0, movesQ = null, countdown = null, joined = !!localStorage.getItem('ox_joined_' + GAME_ID + be.uid);
+  let myName = localStorage.getItem('ox_name') || '';
+
+  const root = h('div', 'player'); app.append(root);
+
+  const amAlive = () => !game || !game.alive || game.alive.includes(be.uid);
+
+  function flush() {
+    clearTimeout(saveTimer); saveTimer = null;
+    if (savedSide === mySide) return;
+    savedSide = mySide; moves++;
+    be.savePlayer({ side: mySide, t: Date.now() });
+  }
+  function choose(side) {
+    if (!game || game.phase !== 'question' || localLocked || !amAlive()) return;
+    if (movesQ !== game.qNo) { movesQ = game.qNo; moves = 0; }
+    if (moves >= MAX_MOVES_PER_QUESTION) { toast('이번 문제는 이동 횟수를 다 썼어요!'); return; }
+    if (side === mySide) return;
+    mySide = side; render();
+    clearTimeout(saveTimer); saveTimer = setTimeout(flush, 350);  // 빠르게 왔다갔다하면 마지막 위치만 저장
+  }
+
+  function renderJoin() {
+    root.innerHTML = '';
+    const w = h('div', 'p-join');
+    w.append(h('h1', null, EVENT_TITLE));
+    w.append(h('div', null, '이름을 입력하고 입장하세요. 진행자 화면에 이름이 떠다녀요!'));
+    const inp = h('input'); inp.maxLength = 12; inp.placeholder = '이름 (예: 홍길동)'; inp.value = myName;
+    const btn = h('button', null, '입장하기');
+    const go = () => {
+      const name = inp.value.trim().slice(0, 12);
+      if (!name) { inp.focus(); return; }
+      myName = name; localStorage.setItem('ox_name', name);
+      localStorage.setItem('ox_joined_' + GAME_ID + be.uid, '1'); joined = true;
+      be.savePlayer({ name, side: null, t: Date.now() }); savedSide = null; mySide = null;
+      render();
+    };
+    btn.onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
+    w.append(inp, btn);
+    root.append(w);
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  function badge() {
+    const alive = amAlive();
+    return h('span', 'p-badge ' + (alive ? 'alive' : 'dead'), alive ? '생존' : '관전 중');
+  }
+
+  function center(big, sub, extra) {
+    const c = h('div', 'p-center');
+    c.append(h('div', 'big', big));
+    if (sub) c.append(h('div', 'sub', sub));
+    if (extra) c.append(extra);
+    return c;
+  }
+
+  function render() {
+    if (!joined) return renderJoin();
+    root.innerHTML = '';
+    const foot = h('div', 'p-foot'); foot.append(document.createTextNode(myName + '  '), badge());
+
+    if (!game) { root.append(center('⏳', '진행자가 아직 게임을 열지 않았어요.'), foot); return; }
+
+    const ph = game.phase === 'question' && localLocked ? 'locked' : game.phase;
+    if (ph === 'lobby') {
+      root.append(center('🙌', '입장 완료! 곧 시작합니다.\n화면을 켜둔 채로 기다려 주세요.'), foot);
+      return;
+    }
+    if (ph === 'final') {
+      const win = (game.winners || []).some(w => w.uid === be.uid);
+      root.append(center(win ? '🏆 우승!' : '🎉 수고하셨어요!', win ? '최후의 생존자입니다!' : '우승자는 큰 화면에서 확인하세요.'), foot);
+      return;
+    }
+    if (ph === 'reveal') {
+      const alive = amAlive();
+      const wasIn = (game.prevAlive || []).includes(be.uid) || !game.prevAlive;
+      let big, sub;
+      if (game.allWrong) { big = '😮 전원 오답!'; sub = '모두 틀려서 아무도 탈락하지 않아요.'; }
+      else if (alive) { big = '⭕ 정답!'; sub = `정답은 ${game.answer} — 계속 살아남았어요.`; }
+      else if (wasIn) { big = '😢 탈락'; sub = `정답은 ${game.answer}였어요. 관전 모드로 계속 볼 수 있어요.`; }
+      else { big = `정답: ${game.answer}`; sub = '관전 중이에요.'; }
+      root.append(center(big, sub), foot);
+      return;
+    }
+
+    // question / locked
+    const head = h('div', 'p-head');
+    head.append(h('div', 'p-q', `Q${game.qNo}. ${game.qText || ''}`));
+    const tm = h('div', 'p-timer', ph === 'locked' ? '마감' : '');
+    head.append(tm);
+    const sides = h('div', 'p-sides' + (ph !== 'question' || !amAlive() ? ' disabled' : ''));
+    ['O', 'X'].forEach(s => {
+      const b = h('button', 'p-side ' + s.toLowerCase() + (mySide === s ? ' sel' : ''));
+      b.append(h('span', 'mark', s));
+      b.append(h('span', 'me', myName));
+      b.onpointerdown = () => choose(s);
+      sides.append(b);
+    });
+    if (!amAlive()) foot.prepend(document.createTextNode('탈락해서 관전 중이에요 · '));
+    else if (ph === 'question' && !mySide) foot.prepend(document.createTextNode('O 또는 X를 눌러 이동하세요! · '));
+    root.append(head, sides, foot);
+
+    if (ph === 'question') {
+      clearInterval(countdown);
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((game._endLocal - Date.now()) / 1000));
+        tm.textContent = left; tm.classList.toggle('warn', left <= 3);
+        if (left <= 0) { clearInterval(countdown); if (!localLocked) { localLocked = true; flush(); render(); } }
+      };
+      tick(); countdown = setInterval(tick, 200);
+    }
+  }
+
+  be.watchGame(g => {
+    const prev = game;
+    game = g;
+    if (g && g.phase === 'question' && (!prev || prev.phase !== 'question' || prev.qNo !== g.qNo)) {
+      game._endLocal = Date.now() + (g.duration || QUESTION_SECONDS) * 1000;   // 받은 시점부터 카운트
+      localLocked = false;
+    } else if (g && prev && prev._endLocal && g.phase === 'question') game._endLocal = prev._endLocal;
+    if (g && g.phase === 'locked') flush();   // 마감 직전 이동분 즉시 저장
+    if (g && g.phase === 'lobby' && prev && g.resetAt && prev.resetAt !== g.resetAt && mySide) {
+      mySide = null; savedSide = null; be.savePlayer({ side: null, t: Date.now() });   // 처음으로: 가운데로 복귀
+    }
+    render();
+  });
+
+  // 새로고침했을 때 화면과 저장된 위치를 맞춤 (가운데에서 다시 시작)
+  if (joined && myName) be.savePlayer({ name: myName, side: null, t: Date.now() });
+}
+
+/* ═══════════════════════ 진행자 화면 ═══════════════════════ */
+function startHost(be) {
+  let game = null, players = {}, bots = {}, lockedSides = null, timer = null, endAt = 0;
+  let questions = parseQ(localStorage.getItem('ox_questions_' + GAME_ID) || DEFAULT_QUESTIONS);
+
+  function parseQ(txt) {
+    return txt.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      const m = l.match(/^([OXox○×])\s*[|.:)\-]?\s*(.+)$/);
+      if (!m) return null;
+      return { answer: /[Oo○]/.test(m[1]) ? 'O' : 'X', text: m[2].trim() };
+    }).filter(Boolean);
+  }
+
+  /* 화면 뼈대 */
+  app.innerHTML = `
+  <div class="host">
+    <div class="h-top">
+      <div class="h-title"></div>
+      <div class="h-stat"><span>참가 <b id="nAll">0</b></span><span>생존 <b id="nAlive">0</b></span></div>
+    </div>
+    <div class="h-q"><div class="h-qno" id="qno"></div><div class="h-qtext" id="qtext"></div><div class="h-timer hidden" id="timer"></div></div>
+    <div class="arena lobby" id="arena">
+      <div class="zone o" id="zO"><div class="glyph">O</div><div class="cnt" id="cO"></div></div>
+      <div class="zone mid" id="zM"><div class="glyph">미선택</div></div>
+      <div class="zone x" id="zX"><div class="glyph">X</div><div class="cnt" id="cX"></div></div>
+      <div class="lobby-card" id="lobbyCard">
+        <h2>📱 폰으로 접속!</h2>
+        <div class="qr" id="qr"></div>
+        <div class="url" id="url"></div>
+        <div style="margin-top:14px;color:var(--muted)">현재 참가자</div>
+        <div class="big" id="lobbyCnt">0</div>
+      </div>
+    </div>
+    <div class="h-bar">
+      <button class="primary" id="bMain"></button>
+      <span class="msg" id="msg"></span>
+      <span class="spacer"></span>
+      <button id="bFinal">🏆 우승자 발표</button>
+      <button id="bRevive">패자부활(전원)</button>
+      <button id="bEdit">문제 편집</button>
+      <button id="bBots">가상 참가자 +50</button>
+      <button id="bReset">처음으로</button>
+    </div>
+  </div>`;
+  $('.h-title').textContent = EVENT_TITLE + (be.mode === 'demo' ? '  · 데모 모드' : '') + (ROOM ? '  · 방: ' + ROOM : '');
+
+  const joinUrl = location.origin + location.pathname + (ROOM ? '?room=' + ROOM : '');
+  $('#url').textContent = joinUrl;
+  (function drawQR(n = 0) {
+    if (window.qrcode) {
+      const q = qrcode(0, 'M'); q.addData(joinUrl); q.make();
+      $('#qr').innerHTML = q.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+    } else if (n < 40) setTimeout(() => drawQR(n + 1), 250);
+    else $('#qr').innerHTML = `<img alt="QR" style="width:100%;max-width:320px" src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=8&data=${encodeURIComponent(joinUrl)}">`;
+  })();
+
+  const arena = $('#arena');
+  const allPlayers = () => ({ ...players, ...bots });
+  const aliveList = () => game && game.alive ? game.alive : Object.keys(allPlayers());
+  const isAlive = id => !game || !game.alive || game.alive.includes(id);
+
+  /* 상태 저장 */
+  function save(patch) {
+    const next = { title: EVENT_TITLE, phase: 'lobby', qNo: 0, qText: '', answer: null, alive: null, duration: QUESTION_SECONDS, ...game, ...patch };
+    delete next.hostUid; delete next._endLocal;
+    game = { ...next };
+    be.setGame(next);
+    render();
+  }
+
+  /* 진행 동작 */
+  function ask() {
+    const qi = game.qNo;   // 다음 문제 인덱스 = 현재 번호
+    if (qi >= questions.length) { toast('준비된 문제를 모두 냈어요. 우승자를 발표하거나 문제를 추가하세요.'); return; }
+    const q = questions[qi];
+    const alive = game.alive || Object.keys(allPlayers());   // 첫 문제: 지금 들어온 사람 전원 참가
+    lockedSides = null;
+    endAt = Date.now() + QUESTION_SECONDS * 1000;
+    save({ phase: 'question', qNo: qi + 1, qText: q.text, answer: null, alive, prevAlive: null, allWrong: false });
+    clearInterval(timer);
+    timer = setInterval(() => {
+      const left = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      const t = $('#timer'); t.textContent = left; t.classList.toggle('warn', left <= 3);
+      if (left <= 0) { clearInterval(timer); lock(false); }
+    }, 100);
+  }
+  function lock(manual) {
+    clearInterval(timer);
+    if (manual) save({ phase: 'locked' });          // 조기 마감: 참가자에게 알림
+    else { game = { ...game, phase: 'locked' }; render(); }   // 자동 마감: 참가자 폰도 10초 뒤 스스로 마감(서버 사용량 절약)
+    $('#msg').textContent = '마감! 마지막 이동을 집계하는 중…';
+    setTimeout(() => { snapshotSides(); render(); $('#msg').textContent = '집계 완료 — Space로 정답 공개'; }, 1200);   // 마감 직전 전송분 받을 여유
+  }
+  function snapshotSides() {
+    const all = allPlayers();
+    lockedSides = {};
+    (game.alive || []).forEach(id => lockedSides[id] = all[id] ? (all[id].side || null) : null);
+  }
+  function reveal() {
+    if (!lockedSides) snapshotSides();
+    const q = questions[game.qNo - 1];
+    const prevAlive = game.alive || [];
+    let alive = prevAlive.filter(id => lockedSides[id] === q.answer);
+    const allWrong = alive.length === 0 && prevAlive.length > 0;
+    if (allWrong) alive = prevAlive.slice();
+    save({ phase: 'reveal', answer: q.answer, alive, prevAlive, allWrong });
+    // 탈락 애니메이션
+    if (!allWrong) prevAlive.forEach(id => { if (!alive.includes(id) && chips[id]) { chips[id].el.classList.add('out'); chips[id].dying = Date.now(); } });
+  }
+  function finale() {
+    const all = allPlayers();
+    const winners = aliveList().filter(id => all[id]).map(id => ({ uid: id, name: all[id].name }));
+    save({ phase: 'final', winners });
+  }
+
+  /* 버튼 */
+  const bMain = $('#bMain');
+  bMain.onclick = () => {
+    if (!game) return;
+    const ph = game.phase;
+    if (ph === 'lobby' || ph === 'reveal') ask();
+    else if (ph === 'question') lock(true);
+    else if (ph === 'locked') reveal();
+    else if (ph === 'final') save({ phase: 'reveal' });
+  };
+  addEventListener('keydown', e => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); bMain.click(); }
+  });
+  $('#bFinal').onclick = () => finale();
+  $('#bRevive').onclick = () => {
+    if (!confirm('지금 접속한 모든 참가자를 다시 살릴까요?')) return;
+    save({ alive: Object.keys(allPlayers()), allWrong: false });
+    toast('전원 부활!');
+  };
+  $('#bReset').onclick = () => {
+    if (!confirm('게임을 처음(대기 화면)으로 되돌릴까요? 참가자 이름은 그대로 남아요.')) return;
+    clearInterval(timer); lockedSides = null;
+    Object.values(chips).forEach(c => { c.el.classList.remove('out'); c.dying = 0; });
+    save({ phase: 'lobby', qNo: 0, qText: '', answer: null, alive: null, prevAlive: null, allWrong: false, winners: null, resetAt: Date.now() });
+  };
+  $('#bBots').onclick = () => {
+    const fam = '김이박최정강조윤장임한오서신권황안송류홍', given = ['민준', '서연', '도윤', '지우', '하준', '서윤', '은우', '지민', '예준', '수아', '시우', '하은', '주원', '지유', '유준', '채원'];
+    for (let i = 0; i < 50; i++) {
+      const id = 'bot' + Math.random().toString(36).slice(2, 9);
+      bots[id] = { name: fam[Math.random() * fam.length | 0] + given[Math.random() * given.length | 0], side: null, bot: true };
+    }
+    if (game && game.alive && game.phase !== 'lobby') toast('가상 참가자는 다음 "처음으로" 또는 패자부활 때 게임에 합류해요');
+    render();
+  };
+  $('#bEdit').onclick = () => {
+    const m = h('div', 'modal');
+    m.innerHTML = `<div class="box"><h3 style="margin-top:0">문제 편집</h3>
+      <p style="color:var(--muted);margin-top:0">한 줄에 한 문제. 맨 앞에 정답 <b>O</b> 또는 <b>X</b>를 쓰고 한 칸 띄운 뒤 문제를 적으세요.</p>
+      <textarea></textarea><div class="row"><span style="margin-right:auto;color:var(--muted)" id="qcount"></span><button>취소</button><button class="primary">저장</button></div></div>`;
+    const ta = $('textarea', m);
+    ta.value = questions.map(q => q.answer + ' ' + q.text).join('\n');
+    const upd = () => $('#qcount', m).textContent = parseQ(ta.value).length + '문제';
+    ta.oninput = upd; upd();
+    const [bc, bs] = m.querySelectorAll('.row button');
+    bc.onclick = () => m.remove();
+    bs.onclick = () => { questions = parseQ(ta.value); localStorage.setItem('ox_questions_' + GAME_ID, ta.value); m.remove(); render(); toast(questions.length + '문제 저장됨'); };
+    document.body.append(m);
+  };
+
+  /* 이름표(칩) 애니메이션 */
+  const chips = {};
+  let armedKill = null;
+  function zoneRect(zone) {
+    const W = arena.clientWidth, H = arena.clientHeight;
+    const pad = 70;
+    if (zone === 'lobby') return [W * 0.02 + pad, W * 0.70 - pad, pad, H - pad / 2];
+    if (zone === 'O') return [pad, W * 0.42 - pad, pad + 40, H - pad / 2];
+    if (zone === 'X') return [W * 0.58 + pad, W - pad, pad + 40, H - pad / 2];
+    return [W * 0.42 + 50, W * 0.58 - 50, pad + 10, H - pad / 2];
+  }
+  function newTarget(c) {
+    const [x1, x2, y1, y2] = zoneRect(c.zone);
+    c.tx = x1 + Math.random() * Math.max(1, x2 - x1);
+    c.ty = y1 + Math.random() * Math.max(1, y2 - y1);
+    c.next = Date.now() + 1500 + Math.random() * 3000;
+  }
+  function sync() {
+    const all = allPlayers();
+    const phase = game ? game.phase : 'lobby';
+    // 제거된 참가자
+    Object.keys(chips).forEach(id => { if (!all[id]) { chips[id].el.remove(); delete chips[id]; } });
+    const n = Object.keys(all).length;
+    arena.style.setProperty('--chip-fs', n > 300 ? '12px' : n > 220 ? '13px' : n > 140 ? '15px' : n > 70 ? '17px' : '20px');
+    arena.classList.toggle('crowd', n > 220);
+    Object.entries(all).forEach(([id, p]) => {
+      let c = chips[id];
+      if (!c) {
+        const el = h('div', 'chip' + (p.bot ? ' bot' : ''));
+        el.onclick = () => kill(id);
+        arena.append(el);
+        c = chips[id] = { el, x: arena.clientWidth * 0.35, y: arena.clientHeight * 0.5, zone: null, tx: 0, ty: 0, next: 0 };
+      }
+      c.el.textContent = p.name || '?';
+      const side = phase === 'lobby' ? null : (lockedSides && phase !== 'question' && id in lockedSides ? lockedSides[id] : p.side);
+      const zone = phase === 'lobby' ? 'lobby' : (side || 'M');
+      if (zone !== c.zone) { c.zone = zone; newTarget(c); }
+      c.el.className = 'chip' + (p.bot ? ' bot' : '') + (side ? ' side-' + side : '') + (c.dying ? ' out' : '') + (armedKill === id ? ' kill' : '');
+      const hide = phase !== 'lobby' && !isAlive(id) && !(c.dying && Date.now() - c.dying < 1300);
+      c.el.style.display = hide ? 'none' : '';
+    });
+  }
+  function kill(id) {
+    if (armedKill !== id) { armedKill = id; sync(); toast('한 번 더 누르면 "' + (allPlayers()[id] || {}).name + '" 이름을 삭제해요'); setTimeout(() => { if (armedKill === id) { armedKill = null; sync(); } }, 3000); return; }
+    armedKill = null;
+    if (bots[id]) delete bots[id]; else be.deletePlayer(id);
+    sync();
+  }
+  (function frame() {
+    const now = Date.now();
+    for (const id in chips) {
+      const c = chips[id];
+      if (c.el.style.display === 'none') continue;
+      if (now > c.next) newTarget(c);
+      c.x += (c.tx - c.x) * 0.05; c.y += (c.ty - c.y) * 0.05;
+      c.el.style.transform = `translate3d(${c.x}px,${c.y}px,0) translate(-50%,-50%)`;
+    }
+    requestAnimationFrame(frame);
+  })();
+  addEventListener('resize', () => Object.values(chips).forEach(newTarget));
+
+  /* 가상 참가자 움직임 (화면 테스트용, 저장소에 쓰지 않음) */
+  setInterval(() => {
+    if (!game || game.phase !== 'question') return;
+    let moved = false;
+    for (const id in bots) {
+      if (!isAlive(id)) continue;
+      if (Math.random() < 0.12) { bots[id].side = Math.random() < 0.5 ? 'O' : 'X'; moved = true; }
+    }
+    if (moved) sync();
+  }, 400);
+
+  /* 화면 갱신 */
+  function render() {
+    if (!game) return;
+    const ph = game.phase, all = allPlayers();
+    const alive = aliveList().filter(id => all[id]);
+    $('#nAll').textContent = Object.keys(all).length;
+    $('#nAlive').textContent = ph === 'lobby' ? Object.keys(all).length : alive.length;
+    $('#lobbyCnt').textContent = Object.keys(all).length;
+    arena.classList.toggle('lobby', ph === 'lobby');
+    $('#lobbyCard').classList.toggle('hidden', ph !== 'lobby');
+    $('#timer').classList.toggle('hidden', ph !== 'question');
+    $('#qno').textContent = ph === 'lobby' ? '' : 'Q' + game.qNo;
+    $('#qtext').textContent = ph === 'lobby' ? `준비된 문제 ${questions.length}개 · 폰으로 QR을 찍어 입장하세요!` : (game.qText || '');
+
+    // O/X 인원
+    const cnt = { O: 0, X: 0 };
+    alive.forEach(id => { const s = lockedSides && ph !== 'question' && id in lockedSides ? lockedSides[id] : (all[id] || {}).side; if (s) cnt[s]++; });
+    $('#cO').textContent = ph === 'lobby' ? '' : cnt.O + '명';
+    $('#cX').textContent = ph === 'lobby' ? '' : cnt.X + '명';
+
+    $('#zO').classList.toggle('correct', ph === 'reveal' && game.answer === 'O');
+    $('#zX').classList.toggle('correct', ph === 'reveal' && game.answer === 'X');
+    $('#zO').classList.toggle('wrong', ph === 'reveal' && game.answer === 'X');
+    $('#zX').classList.toggle('wrong', ph === 'reveal' && game.answer === 'O');
+
+    const more = game.qNo < questions.length;
+    const labels = {
+      lobby: '▶ 게임 시작 (첫 문제)',
+      question: '⏹ 지금 마감',
+      locked: '정답 공개',
+      reveal: more ? `▶ 다음 문제 (Q${game.qNo + 1})` : '문제 끝 — 우승자 발표 ▶',
+      final: '우승자 화면 닫기',
+    };
+    bMain.textContent = labels[ph] + '  [Space]';
+    const msg = $('#msg');
+    if (ph === 'reveal') msg.textContent = game.allWrong ? '전원 오답이라 아무도 탈락하지 않았어요.' : `정답 ${game.answer} · 생존 ${alive.length}명` + (alive.length <= 3 ? ' — 우승자 발표 가능!' : '');
+    else if (ph === 'lobby') msg.textContent = be.mode === 'demo' ? '데모 모드: 같은 브라우저 다른 탭에서 참가자 화면을 열어보세요.' : '';
+    else if (ph === 'question') msg.textContent = '';
+
+    // 우승 화면
+    let fin = $('.final');
+    if (ph === 'final') {
+      if (!fin) {
+        fin = h('div', 'final');
+        fin.append(h('h1', null, '🏆 최후의 생존자'));
+        const wn = (game.winners || []).length;
+        if (wn > 1) fin.append(h('div', 'sub', wn + '명'));
+        const names = h('div', 'names' + (wn > 24 ? ' many' : ''));
+        (game.winners || []).forEach(w => names.append(h('span', null, w.name)));
+        if (!(game.winners || []).length) names.append(h('span', null, '생존자 없음'));
+        fin.append(names);
+        const cl = h('button', 'close', '닫기'); cl.onclick = () => save({ phase: 'reveal' }); fin.append(cl);
+        const colors = ['#fbbf24', '#34d399', '#60a5fa', '#f472b6', '#f87171', '#a78bfa'];
+        for (let i = 0; i < 90; i++) {
+          const c = h('div', 'confetti');
+          c.style.left = Math.random() * 100 + 'vw'; c.style.background = colors[i % colors.length];
+          c.style.animationDuration = 3 + Math.random() * 4 + 's'; c.style.animationDelay = -Math.random() * 6 + 's';
+          fin.append(c);
+        }
+        document.body.append(fin);
+      }
+    } else if (fin) fin.remove();
+    sync();
+  }
+  // "문제 끝" 상태에서 메인 버튼은 우승자 발표
+  const origMain = bMain.onclick;
+  bMain.onclick = () => { if (game && game.phase === 'reveal' && game.qNo >= questions.length) finale(); else origMain(); };
+
+  be.watchPlayers(m => { players = m; render(); });
+  be.watchGame(g => {
+    if (!g) { save({ phase: 'lobby' }); return; }        // 처음 열 때 게임 방 생성
+    if (g.hostUid && g.hostUid !== be.uid && be.mode === 'firebase') toast('다른 기기가 이 게임의 진행자예요.', 6000);
+    const keep = game; game = g;
+    if (keep && keep.phase === 'question' && g.phase === 'question') { /* 내 타이머 유지 */ }
+    render();
+  });
+}
+
+/* ───────── 시작 ───────── */
+makeBackend().then(be => isHost ? startHost(be) : startPlayer(be)).catch(e => {
+  console.error(e);
+  app.innerHTML = '';
+  app.append(h('div', 'p-center', '연결에 실패했어요: ' + (e.code || e.message)));
+});
+</script>
+</body>
+</html>
