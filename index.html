@@ -157,21 +157,30 @@ function toast(msg, ms = 3500) {
 }
 
 /* ───────── 저장소: Firebase(Firestore) 또는 데모(localStorage) ───────── */
-async function makeBackend() {
+async function makeBackend(asHost) {
   if (!FIREBASE_CONFIG) return makeDemoBackend();
   const V = '10.12.2';
-  const [{ initializeApp }, A, F] = await Promise.all([
+  const [{ initializeApp }, F] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
   ]);
   const fb = initializeApp(FIREBASE_CONFIG);
-  const auth = A.getAuth(fb);
   const db = F.getFirestore(fb);
-  const uid = await new Promise((res, rej) => {
-    const off = A.onAuthStateChanged(auth, u => { if (u) { off(); res(u.uid); } });
-    A.signInAnonymously(auth).catch(rej);
-  });
+  let uid, key = '';
+  if (asHost) {
+    // 진행자만 익명 로그인 (Firebase는 IP당 새 계정을 시간당 100개로 제한하므로 참가자는 로그인하지 않음)
+    const A = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`);
+    const auth = A.getAuth(fb);
+    uid = await new Promise((res, rej) => {
+      const off = A.onAuthStateChanged(auth, u => { if (u) { off(); res(u.uid); } });
+      A.signInAnonymously(auth).catch(rej);
+    });
+  } else {
+    // 참가자: 기기마다 무작위 ID + 비밀 열쇠(본인 기록만 고칠 수 있게)
+    const rnd = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => 'abcdefghijkmnopqrstuvwxyz23456789'[b % 33]).join('');
+    uid = localStorage.getItem('ox_pid') || rnd(20); localStorage.setItem('ox_pid', uid);
+    key = localStorage.getItem('ox_key') || rnd(24); localStorage.setItem('ox_key', key);
+  }
   const gameRef = F.doc(db, 'games', GAME_ID);
   const playersCol = F.collection(db, 'games', GAME_ID, 'players');
   const onErr = e => { console.error(e); toast('연결 오류: ' + (e.code || e.message)); };
@@ -183,7 +192,7 @@ async function makeBackend() {
       if (e.code === 'permission-denied') toast('이 게임 방은 다른 기기가 진행 중이에요. GAME_ID를 바꾸거나 콘솔에서 게임 문서를 지워주세요.', 8000);
     }),
     watchPlayers: cb => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, onErr),
-    savePlayer: d => F.setDoc(F.doc(playersCol, uid), d, { merge: true }).catch(onErr),
+    savePlayer: d => F.setDoc(F.doc(playersCol, uid), { ...d, k: key }, { merge: true }).catch(onErr),
     deletePlayer: id => F.deleteDoc(F.doc(playersCol, id)).catch(onErr),
     deleteAllPlayers: async ids => {
       for (let i = 0; i < ids.length; i += 400) {
@@ -673,7 +682,7 @@ function startHost(be) {
 }
 
 /* ───────── 시작 ───────── */
-makeBackend().then(be => isHost ? startHost(be) : startPlayer(be)).catch(e => {
+makeBackend(isHost).then(be => isHost ? startHost(be) : startPlayer(be)).catch(e => {
   console.error(e);
   app.innerHTML = '';
   app.append(h('div', 'p-center', '연결에 실패했어요: ' + (e.code || e.message)));
