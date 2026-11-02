@@ -205,6 +205,7 @@ const FIREBASE_CONFIG = ["localhost", "127.0.0.1", ""].includes(location.hostnam
 const ROOM = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '');
 const GAME_ID = ROOM || 'kmedi-anniversary';
 const EVENT_TITLE = '케이메디허브 창립 16주년 OX 퀴즈';
+const APP_VERSION = '11.02 최종';   // 진행자 화면 오른쪽 아래에 표시돼요
 const QUESTION_SECONDS = 10;                    // 문제당 제한 시간(초)
 const MAX_MOVES_PER_QUESTION = 12;              // 한 문제에서 O↔X 이동 저장 최대 횟수 (무료 사용량 보호)
 // 우승자 화면 배경 음악 (유튜브 주소, 비우면 음악 없음). START = 시작 위치(초)
@@ -340,6 +341,7 @@ async function makeBackend(asHost) {
     }),
     watchPlayers: cb => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, onErr),
     savePlayer: d => F.setDoc(F.doc(playersCol, uid), { ...d, k: key }, { merge: true }).catch(onErr),
+    savePlayerAs: (pid, d) => F.setDoc(F.doc(playersCol, pid), d, { merge: true }),
     deletePlayer: id => F.deleteDoc(F.doc(playersCol, id)).catch(onErr),
     deleteAllPlayers: async ids => {
       for (let i = 0; i < ids.length; i += 400) {
@@ -366,6 +368,7 @@ function makeDemoBackend() {
     setGame: async d => write(KG, { ...d, hostUid: uid }),
     watchPlayers: cb => { subs[KP].push(cb); setTimeout(() => cb(read(KP) || {})); },
     savePlayer: async d => { const p = read(KP) || {}; p[uid] = { ...(p[uid] || {}), ...d }; write(KP, p); },
+    savePlayerAs: async (pid, d) => { const p = read(KP) || {}; p[pid] = { ...(p[pid] || {}), ...d }; write(KP, p); },
     deletePlayer: async id => { const p = read(KP) || {}; delete p[id]; write(KP, p); },
     deleteAllPlayers: async () => write(KP, {}),
   };
@@ -628,6 +631,7 @@ function startHost(be) {
       <button id="bRevive">패자부활(전원)</button>
       <button id="bEdit">문제 편집</button>
       <button id="bBots">가상 참가자 +50</button>
+      <span id="ver" style="color:var(--muted);font-size:12px;margin-right:4px"></span>
       <button id="bSound"></button>
       <button id="bReset">처음으로</button>
     </div>
@@ -751,6 +755,7 @@ function startHost(be) {
     if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); bMain.click(); }
   });
   $('#bFinal').onclick = () => finale();
+  $('#ver').textContent = '버전 ' + APP_VERSION;
   const bSound = $('#bSound');
   const paintSound = () => bSound.textContent = sfx.on ? '🔊 소리 켜짐' : '🔇 소리 꺼짐';
   bSound.onclick = () => { sfx.toggle(); paintSound(); if (sfx.on) sfx.tick(false); };
@@ -977,7 +982,52 @@ function startHost(be) {
 }
 
 /* ───────── 시작 ───────── */
-makeBackend(isHost).then(be => isHost ? startHost(be) : startPlayer(be)).catch(e => {
+
+/* ═══════════════════════ 부하 테스트 (?loadtest=350&room=이름) ═══════════════════════
+   이 탭 하나가 가상 참가자 N명으로 실제 서버에 입장하고, 문제마다 O/X를 골라요.
+   진행자 화면은 다른 탭에서 ?host&room=같은이름 으로 열어 진행하세요. 본행사 방에서는 동작하지 않아요. */
+function startLoadTest(be, n) {
+  const rnd = k => Array.from(crypto.getRandomValues(new Uint8Array(k)), b => 'abcdefghijkmnopqrstuvwxyz23456789'[b % 33]).join('');
+  const fam = '김이박최정강조윤장임한오서신권황안송류홍', given = ['민준', '서연', '도윤', '지우', '하준', '서윤', '은우', '지민', '예준', '수아', '시우', '하은', '주원', '지유', '유준', '채원'];
+  const bots = Array.from({ length: n }, () => ({
+    pid: 'lt' + rnd(18), k: rnd(24), c: Math.random() * CHARS.length | 0,
+    name: '봇' + fam[Math.random() * fam.length | 0] + given[Math.random() * given.length | 0],
+  }));
+  let writes = 0, errors = 0, game = null, lastQ = null, lastReset = null;
+  const stat = { joined: 0 };
+  app.innerHTML = `<div style="padding:28px;font:16px/1.7 var(--text);max-width:720px">
+    <h2 style="margin:0 0 8px;font-family:var(--display);font-weight:400">부하 테스트: 가상 참가자 ${n}명</h2>
+    <p style="color:var(--muted);margin:0 0 16px">방: <b>${GAME_ID}</b> · 진행자 화면은 다른 탭에서 <b>?host&room=${ROOM}</b> 으로 열어 평소처럼 진행하세요. 이 탭은 열어두기만 하면 돼요.</p>
+    <div id="lt" style="background:#fff;border:2px solid var(--ink);border-radius:14px;padding:16px 20px;font-size:18px"></div></div>`;
+  const paint = () => $('#lt').innerHTML = `입장 완료: <b>${stat.joined}</b> / ${n}명<br>서버 전송: <b>${writes}</b>회 · 오류: <b style="color:${errors ? 'var(--x)' : 'inherit'}">${errors}</b>회<br>현재 상태: <b>${game ? ({ lobby: '대기', question: 'Q' + game.qNo + ' 진행 중', locked: '마감', reveal: '정답 공개', final: '우승자 발표' }[game.phase] || game.phase) : '진행자 대기'}</b>`;
+  const send = (b, d) => { writes++; return be.savePlayerAs(b.pid, { ...d, k: b.k }).then(() => true, e => { errors++; console.error(e); return false; }).finally(paint); };
+  const joinAll = () => {
+    stat.joined = 0;
+    bots.forEach((b, i) => setTimeout(() => send(b, { name: b.name, c: b.c, side: null, t: 0 }).then(ok => { if (ok) stat.joined++; paint(); }), i * 15));   // 약 5초에 걸쳐 차례로 입장
+  };
+  be.watchGame(g => {
+    game = g; paint();
+    if (!g) return;
+    const ep = g.resetAt || 0;
+    if (lastReset === null || ep !== lastReset) { lastReset = ep; lastQ = null; joinAll(); }   // 처음 또는 [처음으로] 후 재입장
+    if (g.phase === 'question' && g.qNo !== lastQ) {
+      lastQ = g.qNo;
+      const alive = g.alive ? new Set(g.alive) : null;
+      bots.forEach(b => {
+        if (alive && !alive.has(b.pid)) return;                 // 탈락한 봇은 가만히
+        if (Math.random() < 0.08) return;                       // 8%는 아무것도 안 고름
+        const pick = () => Math.random() < 0.5 ? 'O' : 'X';
+        setTimeout(() => send(b, { side: pick(), t: g.qNo }), 400 + Math.random() * 7000);
+        if (Math.random() < 0.35) setTimeout(() => send(b, { side: pick(), t: g.qNo }), 7600 + Math.random() * 1800);   // 35%는 막판에 한 번 더 이동
+      });
+    }
+  });
+  paint();
+}
+
+const loadN = Math.min(500, parseInt(new URLSearchParams(location.search).get('loadtest'), 10) || 0);
+if (loadN && !ROOM) { app.innerHTML = '<p style="padding:28px;font-size:18px">부하 테스트는 본행사 방에서는 할 수 없어요. 주소에 <b>&room=loadtest</b> 처럼 테스트 방 이름을 붙여주세요.</p>'; }
+else makeBackend(isHost).then(be => loadN ? startLoadTest(be, loadN) : isHost ? startHost(be) : startPlayer(be)).catch(e => {
   console.error(e);
   app.innerHTML = '';
   app.append(h('div', 'p-center', '연결에 실패했어요: ' + (e.code || e.message)));
