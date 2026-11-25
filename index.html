@@ -208,7 +208,7 @@ const FIREBASE_CONFIG = ["localhost", "127.0.0.1", ""].includes(location.hostnam
 const ROOM = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '');
 const GAME_ID = ROOM || 'kmedi-anniversary';
 const EVENT_TITLE = '케이메디허브 창립 16주년 OX 퀴즈';
-const APP_VERSION = '11.25';   // 진행자 화면 오른쪽 아래에 표시돼요
+const APP_VERSION = '11.25b';   // 진행자 화면 오른쪽 아래에 표시돼요
 const QUESTION_SECONDS = 10;                    // 문제당 제한 시간(초)
 const MAX_MOVES_PER_QUESTION = 12;              // 한 문제에서 O↔X 이동 저장 최대 횟수 (무료 사용량 보호)
 // 우승자 화면 배경 음악 (유튜브 주소, 비우면 음악 없음). START = 시작 위치(초)
@@ -337,14 +337,14 @@ async function makeBackend(asHost) {
   const onErr = e => { console.error(e); toast('연결 오류: ' + (e.code || e.message)); };
   return {
     mode: 'firebase', uid,
-    watchGame: cb => F.onSnapshot(gameRef, s => cb(s.exists() ? s.data() : null), onErr),
+    watchGame: (cb, meta) => F.onSnapshot(gameRef, { includeMetadataChanges: !!meta }, s => cb(s.exists() ? s.data() : null, s.metadata.hasPendingWrites), onErr),
     setGame: d => F.setDoc(gameRef, { ...d, hostUid: uid }).catch(e => {
       onErr(e);
       if (e.code === 'permission-denied') toast('다른 기기가 진행자로 등록돼 있어요. 화면 위 [이 화면을 진행자로]를 눌러주세요.', 6000);
     }),
     // 진행자 비밀번호로 이 기기를 진행자로 등록 (비밀번호는 Firestore 보안 규칙에만 들어 있음)
     claimHost: pass => F.setDoc(F.doc(db, 'hostKeys', uid), { pass }),
-    watchPlayers: cb => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, onErr),
+    watchPlayers: (cb, onFail) => F.onSnapshot(playersCol, s => { const m = {}; s.forEach(d => m[d.id] = d.data()); cb(m); }, e => { if (e.code === 'permission-denied' && onFail) { console.warn(e); onFail(); } else onErr(e); }),
     savePlayer: d => F.setDoc(F.doc(playersCol, uid), { ...d, k: key }, { merge: true }).catch(onErr),
     savePlayerAs: (pid, d) => F.setDoc(F.doc(playersCol, pid), d, { merge: true }),
     deletePlayer: id => F.deleteDoc(F.doc(playersCol, id)).catch(onErr),
@@ -1004,16 +1004,17 @@ function startHost(be) {
 
   // 참가자 명단은 게임 방이 만들어지고 내가 진행자로 확인된 뒤에 구독 (방이 없을 때 구독하면 권한 오류로 끊김)
   let watchingPlayers = false;
-  const startPlayers = () => { if (watchingPlayers) return; watchingPlayers = true; be.watchPlayers(m => { players = m; render(); }); };
+  // 권한이 아직 반영 안 됐으면(진행자 변경 직후 등) 2초 뒤 다시 구독
+  const startPlayers = () => { if (watchingPlayers) return; watchingPlayers = true; be.watchPlayers(m => { players = m; render(); }, () => { watchingPlayers = false; setTimeout(() => { if (!notHost) startPlayers(); }, 2000); }); };
   if (be.mode !== 'firebase') startPlayers();
-  be.watchGame(g => {
+  be.watchGame((g, pending) => {
     if (!g) { if (!notHost) save({ phase: 'lobby' }); return; }        // 처음 열 때 게임 방 생성
     if (g.hostUid && g.hostUid !== be.uid && be.mode === 'firebase') { notHost = true; showTakeover(); }
-    else { notHost = false; hideTakeover(); startPlayers(); }
+    else { notHost = false; hideTakeover(); if (!pending) startPlayers(); }   // 서버 저장이 끝난 뒤에 명단 구독
     const keep = game; game = g;
     if (keep && keep.phase === 'question' && g.phase === 'question') { /* 내 타이머 유지 */ }
     render();
-  });
+  }, true);
 }
 
 /* ───────── 시작 ───────── */
